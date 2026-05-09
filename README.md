@@ -24,7 +24,7 @@ Monitiny 是一个极简的 **Linux 实时监控 Shell 脚本**，无需依赖�
 
 ## ✨运行截图
 
-<img width="413" height="391" alt="image" src="https://github.com/user-attachments/assets/488b4224-9531-47c9-8e23-3c928069c3ec" />
+<img width="419" height="392" alt="image" src="https://github.com/user-attachments/assets/96b0db99-7531-4f70-8baf-81b1905fb8af" />
 
 
 ## ✨ 功能特性
