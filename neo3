@@ -1,0 +1,108 @@
+cat > /usr/bin/monitiny << 'EOF'
+#!/bin/sh
+
+G="\033[38;5;46m"; R="\033[38;5;196m"; Y="\033[38;5;226m"; B="\033[38;5;51m"; W="\033[38;5;15m"; N="\033[0m"
+trap 'printf "\033[?25h"; clear; rm -f /tmp/moni_*; kill $! 2>/dev/null; exit' INT TERM
+
+touch /tmp/moni_net /tmp/moni_docker
+PAD="                      "
+IFACE=$(ls /sys/class/net | grep -E '^(eth|en|end)' | head -n1)
+
+# --- 后台采集：4级滑动窗口平滑算法 ---
+(
+    l_r=0; l_t=0
+    r1=0; r2=0; r3=0; r4=0
+    t1=0; t2=0; t3=0; t4=0
+    while true; do
+        LINE=$(grep "$IFACE" /proc/net/dev | sed 's/:/ /g')
+        c_r=$(echo $LINE | awk '{print $2}'); c_t=$(echo $LINE | awk '{print $10}')
+        
+        if [ "$l_r" -ne 0 ]; then
+            # 每一秒计算一个原始增量
+            curr_r=$(awk -v c="$c_r" -v l="$l_r" 'BEGIN {print (c-l)/1024}')
+            curr_t=$(awk -v c="$c_t" -v l="$l_t" 'BEGIN {print (c-l)/1024}')
+            
+            # 队列推移：保持最近4秒的记录
+            r4=$r3; r3=$r2; r2=$r1; r1=$curr_r
+            t4=$t3; t3=$t2; t2=$t1; t1=$curr_t
+            
+            # 计算滑动平均值 (这样反馈是实时的，但数值是平滑的)
+            echo "$r1 $r2 $r3 $r4 $t1 $t2 $t3 $t4" | awk '{
+                avg_r = ($1+$2+$3+$4)/4; avg_t = ($5+$6+$7+$8)/4;
+                if (avg_r > 120000) avg_r = 0; if (avg_t > 120000) avg_t = 0;
+                printf "%.2f %.2f\n", avg_r, avg_t
+            }' > /tmp/moni_net_speed
+            
+            # 记录总量
+            echo "$c_r $c_t" | awk '{printf "%.2f %.2f\n", $1/1073741824, $2/1073741824}' > /tmp/moni_net_total
+        fi
+        
+        l_r=$c_r; l_t=$c_t; sleep 1
+        
+        # Docker 逻辑 (低频)
+        if command -v docker >/dev/null; then
+            DR=$(docker ps -q | wc -l); DT=$(docker ps -a -q | wc -l); DI=$(docker images -q | sort -u | wc -l)
+            DM=$(docker stats --no-stream --format "{{.MemUsage}}" | awk '{s+=$1} END {printf "%d", s}')
+            echo "${DR:-0} ${DT:-0} ${DI:-0} ${DM:-0}" > /tmp/moni_docker
+        fi
+    done
+) &
+
+printf "\033[?25l"
+clear
+while true; do
+    printf "\033[H"
+    IP=$(ip addr show $IFACE | grep "inet " | awk '{for(i=1;i<=NF;i++) if($i~/^[0-9]/) {print $i;exit}}' | cut -d/ -f1)
+    UP=$(uptime | awk -F', ' '{print $1}' | sed 's/.*up //')
+    LD_RAW=$(cat /proc/loadavg | awk '{printf "%.1f", $1*25}')
+    LD=$(echo $LD_RAW | cut -d. -f1); TM=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null | awk '{printf "%d", $1/1000}')
+    FQ=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null | awk '{printf "%d", $1/1000}')
+    M_T=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo); M_A=$(awk '/MemAvailable/ {printf "%d", $2/1024}' /proc/meminfo)
+    M_U=$((M_T-M_A)); M_P=$((M_U*100/M_T))
+    D_P=$(df / | awk 'NR==2 {print $5}' | tr -d '%'); D_U=$(df -h / | awk 'NR==2 {print $3" / "$2}')
+    
+    RS=$(awk '{print $1}' /tmp/moni_net_speed 2>/dev/null); TS=$(awk '{print $2}' /tmp/moni_net_speed 2>/dev/null)
+    RT=$(awk '{print $1}' /tmp/moni_net_total 2>/dev/null); TT=$(awk '{print $2}' /tmp/moni_net_total 2>/dev/null)
+    DOCK_ALL=$(cat /tmp/moni_docker 2>/dev/null); DR=$(echo $DOCK_ALL | awk '{print $1}'); DT=$(echo $DOCK_ALL | awk '{print $2}'); DI=$(echo $DOCK_ALL | awk '{print $3}'); DM=$(echo $DOCK_ALL | awk '{print $4}')
+
+    [ "$LD" -lt 60 ] && C_L="$G" || { [ "$LD" -lt 80 ] && C_L="$Y" || C_L="$R"; }
+    [ "$M_P" -lt 60 ] && C_M="$G" || { [ "$M_P" -lt 80 ] && C_M="$Y" || C_M="$R"; }
+    [ "$D_P" -lt 60 ] && C_D="$G" || { [ "$D_P" -lt 80 ] && C_D="$Y" || C_D="$R"; }
+    [ "$TM" -lt 60 ] && C_T="$G" || { [ "$TM" -lt 80 ] && C_T="$Y" || C_T="$R"; }
+    [ "$DT" -eq "$DI" ] && C_I="$G" || C_I="$Y"
+
+    printf "\n\n\033[K"
+    printf "${PAD}${B}============================================================${N}\n\033[K"
+    printf "${PAD}          ${Y}NanoPi NEO3 智能监控中心${N} ${G}(V15.8)${N}\033[K\n"
+    printf "${PAD}${B}============================================================${N}\n\033[K"
+    printf "${PAD}${W}内网地址 : ${Y}%-15s${N}        ${W}外网状态 : ${G}● ONLINE${N}\033[K\n" "$IP"
+    printf "${PAD}${W}运行时间 : %-15s${N}\033[K\n" "$UP"
+    printf "${PAD}${W}CPU 负载 : ${C_L}%-5s%%${N}              ${W}压力条 : [" "$LD_RAW"
+    i=0; while [ $i -lt 12 ]; do [ $i -lt $(( (LD>100?100:LD)*12/100 )) ] && printf "${G}■" || printf "${W}·"; i=$((i+1)); done
+    printf "${N}${W}]\033[K\n"
+    printf "${PAD}${B}------------------------------------------------------------${N}\n\033[K"
+    printf "${PAD}${W}核心温度 : ${C_T}%d°C${N}                    ${W}CPU 频率 : ${G}%d MHz${N}\033[K\n" "$TM" "$FQ"
+    printf "${PAD}${B}------------------------------------------------------------${N}\n\033[K"
+    printf "${PAD}${W}内存资源 : ["
+    i=0; while [ $i -lt 25 ]; do [ $i -lt $((M_P*25/100)) ] && printf "${G}■" || printf "${W}·"; i=$((i+1)); done
+    printf "${N}${W}] ${C_M}%d%%${N}\033[K\n" "$M_P"
+    printf "${PAD}${W}内存详情 : ${C_M}%d MB${N}${W} / %d MB${N}\033[K\n" "$M_U" "$M_T"
+    printf "${PAD}${W}存储资源 : ["
+    i=0; while [ $i -lt 25 ]; do [ $i -lt $((D_P*25/100)) ] && printf "${C_D}■" || printf "${W}·"; i=$((i+1)); done
+    printf "${N}${W}] ${C_D}%d%%${N}\033[K\n" "$D_P"
+    printf "${PAD}${W}存储详情 : ${C_D}%s${N}\033[K\n" "$D_U"
+    printf "${PAD}${B}------------------------------------------------------------${N}\n\033[K"
+    printf "${PAD}${W}容器运行 : ${G}%-10s${N}        ${W}容器内存 : ${Y}%-d MB${N}\033[K\n" "$DR Running" "$DM"
+    printf "${PAD}${W}镜像统计 : ${C_I}%-10s${N}        ${W}本地镜像 : ${C_I}%s${N}\033[K\n" "$DT In-Use" "$DI"
+    printf "${PAD}${B}------------------------------------------------------------${N}\n\033[K"
+    awk -v r="${RS:-0}" -v t="${TS:-0}" -v rt="${RT:-0}" -v tt="${TT:-0}" -v G="$G" -v B="$B" -v W="$W" -v Y="$Y" -v PAD="$PAD" 'BEGIN {
+        if(r >= 1024) { rs=r/1024; ru="MB/s" } else { rs=r; ru="KB/s" }
+        if(t >= 1024) { ts=t/1024; tu="MB/s" } else { ts=t; tu="KB/s" }
+        printf "%s%s下载状态 : %s%5.1f %s%s  (累计: %s%.2f GB%s)\n", PAD, W, G, rs, ru, W, Y, rt, W
+        printf "%s%s上传状态 : %s%5.1f %s%s  (累计: %s%.2f GB%s)\n", PAD, W, B, ts, tu, W, Y, tt, W
+    }'
+    printf "${PAD}${B}------------------------------------------------------------${N}\n\033[K"
+    printf "${PAD}                 ${W}按 ${Y}Ctrl+C${N} 退出监控中心${N}\033[K"
+    sleep 1
+done
+EOF
