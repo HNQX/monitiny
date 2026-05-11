@@ -1,4 +1,5 @@
 #!/bin/bash
+
 watch -n 1 -t "
   # 1. 采集数据
   UPTIME=\$(uptime -p | sed 's/up //')
