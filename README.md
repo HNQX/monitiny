@@ -11,6 +11,7 @@ Monitiny 是一个极简的 **Linux 实时监控 Shell 脚本**，无需依赖�
 ## 🖥 适用平台
 
 - 主支持：**NanoPC\-T4 \(Debian 13\)**
+- **NanoPi\-Neo3 \(FriendWRT\)**
 
 - 兼容平台：
 
@@ -61,7 +62,7 @@ Monitiny 是一个极简的 **Linux 实时监控 Shell 脚本**，无需依赖�
 
 ```bash
 # 下载脚本
-sudo wget -O /usr/bin/monitiny https://github.com/HNQX/monitiny/raw/refs/heads/main/main
+sudo wget -O /usr/bin/monitiny https://github.com/HNQX/monitiny/raw/refs/heads/main/t4
 
 # 添加执行权限
 sudo chmod +x /usr/bin/monitiny
