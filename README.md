@@ -10,8 +10,8 @@ Monitiny 是一个极简的 **Linux 实时监控 Shell 脚本**，无需依赖�
 
 ## 🖥 适用平台
 
-- 主支持：**NanoPC\-T4 \(Debian 13\)**
-- **NanoPi\-Neo3 \(FriendWRT\)**
+- 主支持：
+  **NanoPC\-T4 \(Debian 13\)**  |  **NanoPi\-Neo3 \(FriendWRT\)**
 
 - 兼容平台：
 
